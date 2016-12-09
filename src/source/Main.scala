@@ -79,6 +79,23 @@ object Main {
     var yamlOutFolder: Option[File] = None
     var yamlOutFile: Option[String] = None
     var yamlPrefix: String = ""
+    var cxxOutFolder: Option[File] = None
+    var cxxNamespace: String = ""
+    var cxxIncludePrefix: String = ""
+    var cxxExtendedRecordIncludePrefix: String = ""
+    var cxxFileIdentStyle: IdentConverter = IdentStyle.underLower
+    var cxxOptionalTemplate: String = "std::optional"
+    var cxxOptionalHeader: String = "<optional>"
+    var cxxEnumHashWorkaround : Boolean = true
+    var cxxNnHeader: Option[String] = None
+    var cxxNnType: Option[String] = None
+    var cxxNnCheckExpression: Option[String] = None
+    var cxxUseWideStrings: Boolean = false
+    var cxxIdentStyle = IdentStyle.cppDefault
+    var cxxTypeEnumIdentStyle: IdentConverter = null
+    var cxxHeaderOutFolderOptional: Option[File] = None
+    var cxxExt: String = "cpp"
+    var cxxHeaderExt: String = "h"
 	
     val argParser = new scopt.OptionParser[Unit]("djinni") {
 
@@ -188,6 +205,33 @@ object Main {
       opt[String]("yaml-prefix").valueName("<pre>").foreach(yamlPrefix = _)
         .text("The prefix to add to type names stored in YAML files (default: \"\").")
       note("")
+      opt[File]("cxx-out").valueName("<out-folder>").foreach(x => cppOutFolder = Some(x))
+        .text("The output folder for C++/Cx files (Generator disabled if unspecified).")
+      opt[File]("cxx-header-out").valueName("<out-folder>").foreach(x => cppHeaderOutFolderOptional = Some(x))
+        .text("The output folder for C++/Cx header files (default: the same as --cpp-out).")
+      opt[String]("cxx-include-prefix").valueName("<prefix>").foreach(cppIncludePrefix = _)
+        .text("The prefix for #includes of header files from C++/Cx files.")
+      opt[String]("cxx-namespace").valueName("...").foreach(x => cppNamespace = x)
+        .text("The namespace name to use for generated C++/Cx classes.")
+      opt[String]("cxx-ext").valueName("<ext>").foreach(cppExt = _)
+        .text("The filename extension for C++/Cx files (default: \"cpp\").")
+      opt[String]("hxx-ext").valueName("<ext>").foreach(cppHeaderExt = _)
+        .text("The filename extension for C++/Cx header files (default: \"h\").")
+      opt[String]("cxx-optional-template").valueName("<template>").foreach(x => cppOptionalTemplate = x)
+        .text("The template to use for optional values (default: \"std::optional\")")
+      opt[String]("cxx-optional-header").valueName("<header>").foreach(x => cppOptionalHeader = x)
+        .text("The header to use for optional values (default: \"<optional>\")")
+      opt[Boolean]("cxx-enum-hash-workaround").valueName("<true/false>").foreach(x => cppEnumHashWorkaround = x)
+        .text("Work around LWG-2148 by generating std::hash specializations for C++/Cx enums (default: true)")
+      opt[String]("cxx-nn-header").valueName("<header>").foreach(x => cppNnHeader = Some(x))
+        .text("The header to use for non-nullable pointers")
+      opt[String]("cxx-nn-type").valueName("<header>").foreach(x => cppNnType = Some(x))
+        .text("The type to use for non-nullable pointers (as a substitute for std::shared_ptr)")
+      opt[String]("cxx-nn-check-expression").valueName("<header>").foreach(x => cppNnCheckExpression = Some(x))
+        .text("The expression to use for building non-nullable pointers")
+      opt[Boolean]( "cxx-use-wide-strings").valueName("<true/false>").foreach(x => cppUseWideStrings = x)
+        .text("Use wide strings in C++/Cx code (default: false)")
+      note("")      
       opt[File]("list-in-files").valueName("<list-in-files>").foreach(x => inFileListPath = Some(x))
         .text("Optional file in which to write the list of input files parsed.")
       opt[File]("list-out-files").valueName("<list-out-files>").foreach(x => outFileListPath = Some(x))
@@ -215,6 +259,14 @@ object Main {
       identStyle("ident-objc-type-param", c => { objcIdentStyle = objcIdentStyle.copy(typeParam = c) })
       identStyle("ident-objc-local",      c => { objcIdentStyle = objcIdentStyle.copy(local = c) })
       identStyle("ident-objc-file",       c => { objcFileIdentStyleOptional = Some(c) })
+      identStyle("ident-cxx-enum",       c => { cxxIdentStyle = cxxIdentStyle.copy(enum = c) })
+      identStyle("ident-cxx-field",      c => { cxxIdentStyle = cxxIdentStyle.copy(field = c) })
+      identStyle("ident-cxx-method",     c => { cxxIdentStyle = cxxIdentStyle.copy(method = c) })
+      identStyle("ident-cxx-type",       c => { cxxIdentStyle = cxxIdentStyle.copy(ty = c) })
+      identStyle("ident-cxx-enum-type",  c => { cxxTypeEnumIdentStyle = c })
+      identStyle("ident-cxx-type-param", c => { cxxIdentStyle = cxxIdentStyle.copy(typeParam = c) })
+      identStyle("ident-cxx-local",      c => { cxxIdentStyle = cxxIdentStyle.copy(local = c) })
+      identStyle("ident-cxx-file",       c => { cxxFileIdentStyle = c })
 
     }
 
@@ -229,6 +281,7 @@ object Main {
     val jniFileIdentStyle = jniFileIdentStyleOptional.getOrElse(cppFileIdentStyle)
     var objcFileIdentStyle = objcFileIdentStyleOptional.getOrElse(objcIdentStyle.ty)
     val objcppIncludeObjcPrefix = objcppIncludeObjcPrefixOptional.getOrElse(objcppIncludePrefix)
+    val cxxHeaderOutFolder = if (cxxHeaderOutFolderOptional.isDefined) cxxHeaderOutFolderOptional else cxxOutFolder
 
     // Add ObjC prefix to identstyle
     objcIdentStyle = objcIdentStyle.copy(ty = IdentStyle.prefix(objcTypePrefix,objcIdentStyle.ty))
@@ -236,6 +289,10 @@ object Main {
 
     if (cppTypeEnumIdentStyle != null) {
       cppIdentStyle = cppIdentStyle.copy(enumType = cppTypeEnumIdentStyle)
+    }
+
+    if (cxxTypeEnumIdentStyle != null) {
+      cxxIdentStyle = cxxIdentStyle.copy(enumType = cxxTypeEnumIdentStyle)
     }
 
     // Parse IDL file.
@@ -330,7 +387,21 @@ object Main {
       skipGeneration,
       yamlOutFolder,
       yamlOutFile,
-      yamlPrefix)
+      yamlPrefix,
+      cxxOutFolder,
+      cxxHeaderOutFolder,
+      cxxIncludePrefix,
+      cxxExtendedRecordIncludePrefix,
+      cxxNamespace,
+      cxxIdentStyle,
+      cxxFileIdentStyle,
+      cxxOptionalTemplate,
+      cxxOptionalHeader,
+      cxxEnumHashWorkaround,
+      cxxNnHeader,
+      cxxNnType,
+      cxxNnCheckExpression,
+      cxxUseWideStrings)
 
 
     try {

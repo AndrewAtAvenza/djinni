@@ -78,7 +78,21 @@ package object generatorTools {
                    skipGeneration: Boolean,
                    yamlOutFolder: Option[File],
                    yamlOutFile: Option[String],
-                   yamlPrefix: String)
+                   yamlPrefix: String,
+                   cxxOutFolder: Option[File],
+                   cxxHeaderOutFolder: Option[File],
+                   cxxIncludePrefix: String,
+                   cpxxExtendedRecordIncludePrefix: String,
+                   cxxNamespace: String,
+                   cxxIdentStyle: CppIdentStyle,
+                   cxxFileIdentStyle: IdentConverter,
+                   cxxOptionalTemplate: String,
+                   cxxOptionalHeader: String,
+                   cxxEnumHashWorkaround: Boolean,
+                   cxxNnHeader: Option[String],
+                   cxxNnType: Option[String],
+                   cxxNnCheckExpression: Option[String],
+                   cxxUseWideStrings: Boolean)
 
   def preComma(s: String) = {
     if (s.isEmpty) s else ", " + s
@@ -218,6 +232,12 @@ package object generatorTools {
           createFolder("YAML", spec.yamlOutFolder.get)
         }
         new YamlGenerator(spec).generate(idl)
+      }
+      if (spec.cxxOutFolder.isDefined) {
+        if (!spec.skipGeneration) {
+          createFolder("C++/Cx", spec.cxxOutFolder.get)
+        }
+        new CxxGenerator(spec).generate(idl)
       }
       None
     }
